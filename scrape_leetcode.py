@@ -7,46 +7,55 @@ import undetected_chromedriver as uc
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
-from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.common.action_chains import ActionChains
+from selenium.common.exceptions import (
+    NoSuchElementException,
+    TimeoutException,
+    ElementClickInterceptedException
+)
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-
 import openai
+
+########################################
+# 1) LOAD ENVIRONMENT VARIABLES
+########################################
 load_dotenv()
 
-# 1) Configure your credentials and paths
 LEETCODE_USERNAME = os.getenv("LEETCODE_USERNAME")
 LEETCODE_PASSWORD = os.getenv("LEETCODE_PASSWORD")
-API_KEY = os.getenv("OPENAI_API_KEY")  # Securely get key from env variable
-
 API_KEY = os.getenv("OPENAI_API_KEY")
+
 if not API_KEY:
     raise ValueError("OPENAI_API_KEY is missing! Add it to your .env file.")
 
+openai.api_key = API_KEY
 
-# 2) Define a ChatGPT helper to get complexities
+
+########################################
+# 2) CHATGPT HELPER FUNCTIONS
+########################################
 def get_complexities_from_chatgpt(code_str, language="C++"):
     """
     Sends the code snippet to ChatGPT and asks for time and space complexity.
-    Returns a dict with time_complexity and space_complexity.
+    Returns a dict with "time_complexity", "space_complexity", and an "explanation".
     """
-    # You can refine the system/instructions prompts to get more consistent results
     system_prompt = (
-        "You are a senior software engineer who determines the time and space complexity for code snippets. "
-        "Please be concise and accurate."
+        "You are a senior software engineer who determines the time and space "
+        "complexities for code snippets. Provide concise and accurate answers."
     )
-    
     user_prompt = f"""
 Given the following {language} code snippet, please:
-1. State the time complexity in Big-O notation.
-2. State the space complexity in Big-O notation.
-3. Provide a short explanation.
+1. State the time complexity in Big-O notation (like O(n)).
+2. State the space complexity in Big-O notation (like O(1) or O(n)).
+3. Provide a brief explanation.
 
 Code snippet:
 
+{code_str}
 """
+
     try:
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
@@ -56,93 +65,91 @@ Code snippet:
             ],
             temperature=0.0
         )
-        content = response["choices"][0]["message"]["content"]
-        # You could parse the content if needed; for now, just return the whole text
-        return content
+        answer = response["choices"][0]["message"]["content"]
+        return answer.strip()
     except Exception as e:
-        print(f"Error with ChatGPT API: {e}")
+        print(f"[!] Error calling ChatGPT for complexities: {e}")
         return "Error or no response."
 
-# 3) (Optional) Convert code to C++ with ChatGPT if original solution is not in C++
-def convert_to_cpp_with_chatgpt(code_str, original_lang="Python"):
-    """
-    If the code is in Python (or any other language), ask ChatGPT to convert it to C++.
-    """
-    system_prompt = (
-        "You are a senior software engineer who converts code to C++."
-    )
-    user_prompt = f"""
-Convert the following {original_lang} code snippet to equivalent C++ code:
 
-"""
-    try:
-        response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            temperature=0.0
-        )
-        cpp_code = response["choices"][0]["message"]["content"]
-        return cpp_code
-    except Exception as e:
-        print(f"Error converting to C++: {e}")
-        return None
-
-
+########################################
+# 3) UTILITIES FOR HUMAN-LIKE TYPING & BROWSER INIT
+########################################
 def human_like_typing(element, text):
+    """
+    Simulates human typing by sending keys one by one, with short random delays.
+    """
     for char in text:
         element.send_keys(char)
-        time.sleep(random.uniform(0.1, 0.3)) 
+        time.sleep(random.uniform(0.1, 0.3))
 
-# 4) Initialize Selenium (undetected ChromeDriver)
+
 def init_browser():
+    """
+    Initialize an undetected Chrome browser on Windows.
+    Update the user_data_dir, profile-directory, and driver paths
+    to match your local setup.
+    """
     options = webdriver.ChromeOptions()
 
-    # ✅ Use real browser profile
-    options.add_argument("--user-data-dir=/Users/omnisceo/Library/Application Support/Google/Chrome")
-    options.add_argument("--profile-directory=Default")  # Change if needed
+    # Example: Windows user profile path for Chrome
+    user_data_dir = r"C:\Users\YourUsername\AppData\Local\Google\Chrome\User Data"
+    options.add_argument(f"--user-data-dir={user_data_dir}")
+    options.add_argument("--profile-directory=Default")
 
-    # ✅ Spoof User-Agent
-    options.add_argument("user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.6998.89 Safari/537.36")
+    # Spoof Windows Chrome user-agent
+    options.add_argument(
+        "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/134.0.6998.89 Safari/537.36"
+    )
 
-    # ✅ Disable bot detection
+    # Disable some detection features
     options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_argument("--disable-infobars")
     options.add_argument("--disable-popup-blocking")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--no-sandbox")
 
-    # ✅ Initialize Undetected ChromeDriver
+    # Update the path to your actual ChromeDriver location
+    chromedriver_path = r"C:\\Program Files\\ChromeDriver\\chromedriver-win64\\chromedriver.exe"
+
+    # If you need a specific Chrome browser executable path (often optional)
+    browser_path = None  # e.g. r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+
     browser = uc.Chrome(
-        options=options, 
+        options=options,
         use_subprocess=True,
-        browser_executable_path="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-        driver_executable_path="/opt/homebrew/bin/chromedriver"  # Ensure correct path
+        driver_executable_path=chromedriver_path,
+        browser_executable_path=browser_path,
     )
 
-    # ✅ Patch ChromeDriver (Avoid Detection)
+    # Patch to avoid detection
     browser.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
     return browser
 
 
-
-# 5) Login to LeetCode
+########################################
+# 4) LOGIN TO LEETCODE
+########################################
 def login_to_leetcode(browser):
+    """
+    Logs into LeetCode with your credentials from .env.
+    Handles any CAPTCHAs manually by prompting the user.
+    """
     print("[*] Navigating to LeetCode login page...")
     browser.get("https://leetcode.com/accounts/login/")
-    
-    # Wait for user to solve CAPTCHA manually
-    input("\n[!] Solve any CAPTCHA in the browser and then press Enter here...\n")
+
+    # Prompt user to resolve CAPTCHA if any.
+    input("\n[!] Solve any CAPTCHA in the opened browser, then press Enter here to continue...\n")
 
     try:
         username_input = browser.find_element(By.ID, "id_login")
         human_like_typing(username_input, LEETCODE_USERNAME)
         print("[+] Entered username.")
     except NoSuchElementException:
-        print("[-] Could not locate the username field.")
+        print("[-] Username field not found.")
         return
 
     try:
@@ -150,203 +157,238 @@ def login_to_leetcode(browser):
         human_like_typing(password_input, LEETCODE_PASSWORD)
         print("[+] Entered password.")
     except NoSuchElementException:
-        print("[-] Could not locate the password field.")
+        print("[-] Password field not found.")
         return
 
-    # Click login
+    # Click the sign-in button
     try:
         login_button = browser.find_element(By.ID, "signin_btn")
         browser.execute_script("arguments[0].click();", login_button)
         print("[*] Clicked 'Sign In' button.")
     except NoSuchElementException:
-        print("[-] Could not find the sign in button.")
+        print("[-] Sign In button not found.")
         return
 
-    # Check if login succeeded
     time.sleep(3)
-    current_url = browser.current_url
-    if "login" in current_url.lower():
-        print("[-] Still on login page. CAPTCHA or credentials issue.")
+    if "login" in browser.current_url.lower():
+        print("[-] Still on login page. Possibly a CAPTCHA or credential issue.")
     else:
         print("[+] Logged in successfully.")
 
 
-def click_editorial_post(browser):
+########################################
+# 5) HELPER TO CLICK THE C++ FILTER BUTTON
+########################################
+def click_cpp_filter(browser):
     """
-    This function tries to find the 'LeetCode Editorial' post on the Solutions page
-    and clicks it to open the official editorial (like 'two-sum-by-leetcode-kwuq').
-    """   
-    print("[*] Attempting to click on the LeetCode Editorial post...")
-
-    time.sleep(3)  # let solutions list load
-
+    Clicks on the "C++" button in the solutions tab to filter only C++ solutions.
+    """
     try:
-        # Step A: find the editorial post container
-        editorial_post = browser.find_element(
-            By.XPATH,
-            "//div[contains(@class, 'group flex w-full cursor-pointer flex-col gap-1.5 px-4 pt-3')"
-            + " and .//span[text()='Editorial']]"
+        print("[*] Looking for the C++ filter button...")
+        # Wait until the element is clickable
+        cpp_button = WebDriverWait(browser, 10).until(
+            EC.element_to_be_clickable((By.XPATH, "//span[contains(text(), 'C++')]"))
         )
-        # Step B: find the link inside that container
-        editorial_link = editorial_post.find_element(
-            By.XPATH,
-            ".//a[contains(@href, '/problems/') and contains(@href, '/solutions/') and contains(@href, 'two-sum-by-leetcode-kwuq')]"
-        )
-
-        # Finally, click the editorial link
-        editorial_link.click()
+        # Scroll into view and click
+        browser.execute_script("arguments[0].scrollIntoView();", cpp_button)
+        time.sleep(1)
+        cpp_button.click()
         time.sleep(2)
-        print("[+] Clicked on the official LeetCode editorial post.")
-    except NoSuchElementException:
-        print("[!] Could not find the editorial post or link.")
+        print("[+] Clicked the C++ filter button successfully.")
+    except (TimeoutException, NoSuchElementException) as e:
+        print(f"[!] C++ filter button not found or not clickable: {e}")
 
 
+########################################
+# 6) OPTIONALLY EXPAND ALL SOLUTIONS
+########################################
+def expand_all_solutions(browser):
+    """
+    If there's a button or link to expand solutions (like "Show more"),
+    click them before scraping.
+    """
+    try:
+        show_more_buttons = browser.find_elements(By.XPATH, "//button[contains(text(),'Show more')]")
+        for btn in show_more_buttons:
+            try:
+                browser.execute_script("arguments[0].scrollIntoView();", btn)
+                time.sleep(0.5)
+                btn.click()
+                time.sleep(1)
+            except (ElementClickInterceptedException, NoSuchElementException):
+                pass
+    except Exception as e:
+        print(f"[!] expand_all_solutions encountered an error: {e}")
 
+
+########################################
+# 7) EXTRACT SOLUTIONS (AFTER FILTERING)
+########################################
 def extract_solutions(browser):
     """
-    Extracts all solutions by clicking on them and scraping the content.
+    Scrapes the solution code blocks from the Solutions tab, after applying filters.
+    Returns a list of solution dicts with 'index', 'code', and 'chatgpt_analysis'.
     """
+    print("[*] Waiting for solutions to load...")
+    solution_data = []
+
     try:
-        print("[*] Waiting for solutions to load...")
-
-        # ✅ FIX: Wait for solutions to appear
-        WebDriverWait(browser, 10).until(
-            EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'relative') and contains(@class, 'solution')]"))
+        # Wait for a container that indicates solutions are loaded
+        WebDriverWait(browser, 15).until(
+            EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'solution')]"))
         )
-        
-        print("[+] Solutions are visible.")
-        solutions_list = browser.find_elements(By.XPATH, "//div[contains(@class, 'relative') and contains(@class, 'solution')]")
-
-        if not solutions_list:
-            print("[!] No solutions found.")
-            return []
-
-        print(f"[+] Found {len(solutions_list)} solutions. Clicking each one...")
-
-        solution_data = []
-
-        for index, solution in enumerate(solutions_list):
-            try:
-                # ✅ Scroll to the solution (in case of lazy loading)
-                browser.execute_script("arguments[0].scrollIntoView();", solution)
-                time.sleep(1)
-
-                # ✅ Click the solution to expand
-                ActionChains(browser).move_to_element(solution).click().perform()
-                time.sleep(2)
-
-                # ✅ Extract the solution code
-                code_block = solution.find_element(By.XPATH, ".//pre")  # Adjust if necessary
-
-                solution_text = code_block.text.strip() if code_block else "No solution text found."
-                print(f"[+] Extracted solution {index + 1}:\n{solution_text[:200]}...")
-
-                solution_data.append(solution_text)
-
-            except Exception as e:
-                print(f"[!] Failed to extract solution {index + 1}: {e}")
-
+    except TimeoutException:
+        print("[!] Timed out waiting for solutions container. Possibly no solutions or changed HTML.")
         return solution_data
 
-    except Exception as e:
-        print(f"[!] Error extracting solutions: {e}")
-        return []
+    print("[+] Potential solutions visible. Selecting C++ filter (if available).")
+    click_cpp_filter(browser)
+
+    # Wait briefly for the page to refresh after clicking the C++ filter
+    time.sleep(2)
+
+    print("[*] Expanding all solutions if needed...")
+    expand_all_solutions(browser)
+
+    # Now find individual solution blocks
+    solutions_list = browser.find_elements(By.XPATH, "//div[contains(@class, 'solution')]")
+    print(f"[+] Found {len(solutions_list)} solutions (post-filter). Extracting content...")
+
+    for idx, solution_item in enumerate(solutions_list):
+        try:
+            # Scroll each solution into view
+            browser.execute_script("arguments[0].scrollIntoView();", solution_item)
+            time.sleep(1)
+
+            # Usually, there's a <pre> or <code> element containing the solution code
+            code_block = solution_item.find_element(By.XPATH, ".//pre")
+            code_text = code_block.text.strip() if code_block else "No code found"
+
+            # Ask ChatGPT for complexities (optional, can comment out if not needed)
+            complexities_analysis = get_complexities_from_chatgpt(code_text, language="C++")
+
+            solution_data.append({
+                "index": idx + 1,
+                "code": code_text,
+                "chatgpt_analysis": complexities_analysis
+            })
+
+            print(f"[+] C++ Solution #{idx+1}: {code_text[:80]}...")
+        except Exception as e:
+            print(f"[!] Could not extract solution #{idx+1}: {e}")
+
+    return solution_data
 
 
-# 6) Scrape problems + solutions
+########################################
+# 8) SCRAPE A SINGLE PROBLEM'S SOLUTIONS
+########################################
+def scrape_problem_solutions(browser, title, url):
+    """
+    Given a single problem's title/URL, navigate to the solutions tab, scrape solutions, and return them.
+    """
+    solutions_url = url.rstrip("/") + "/solutions/?tab=solutions"
+    print(f"[*] Navigating to solutions page: {solutions_url}")
+
+    browser.get(solutions_url)
+    time.sleep(2)
+
+    extracted_solutions = extract_solutions(browser)
+    return {
+        "problem_title": title,
+        "problem_url": url,
+        "solutions": extracted_solutions
+    }
+
+
+########################################
+# 9) SCRAPE MULTIPLE PROBLEMS
+########################################
 def scrape_problems(browser, num_pages=1):
-    print("[*] Navigating to Problems page...")
+    """
+    Collects problem links from the main problemset, then scrapes each problem's solutions.
+    :param num_pages: How many "Next" pages to iterate through.
+    """
+    print("[*] Navigating to the 'All Problems' page...")
     browser.get("https://leetcode.com/problemset/all/")
     time.sleep(5)
 
-    solutions_data = []  # Store extracted data
+    all_solutions_data = []
 
-    for page in range(num_pages):
-        problem_elements = browser.find_elements(By.XPATH, "//a[contains(@href, '/problems/')]")
-        if not problem_elements:
-            print("[-] No problems found on this page. Possibly the selector changed.")
-            break
-
+    for page_index in range(num_pages):
+        # Gather problem links on this page
         problem_links = []
+        problem_elements = browser.find_elements(By.XPATH, "//a[contains(@href, '/problems/')]")
+
         for elem in problem_elements:
-            url = elem.get_attribute("href")
-            title = elem.text.strip()
-            if url and title:
-                problem_links.append((title, url))
+            href = elem.get_attribute("href")
+            p_title = elem.text.strip()
+            if href and "problems" in href and p_title:
+                # Basic filtering to avoid duplicates
+                problem_links.append((p_title, href))
 
-        for (problem_title, problem_url) in problem_links:
-            print(f"[+] Found problem: {problem_title} | URL: {problem_url}")
+        # Remove potential duplicates by converting to a dict or set
+        unique_problem_links = list(dict.fromkeys(problem_links))
 
-            # ✅ FIX: Use the correct solutions page URL
-            solutions_url = problem_url + "/solutions/?tab=solutions"
-            print(f"[*] Navigating directly to: {solutions_url}")
-            browser.get(solutions_url)
+        print(f"[*] Found {len(unique_problem_links)} problems on page {page_index+1}.")
 
-            # ✅ Extract all solutions for this problem
-            extracted_solutions = extract_solutions(browser)
+        # Scrape each problem
+        for (p_title, p_url) in unique_problem_links:
+            print(f"  > [Problem] {p_title}: {p_url}")
+            problem_solutions = scrape_problem_solutions(browser, p_title, p_url)
+            all_solutions_data.append(problem_solutions)
 
-            # ✅ Store extracted solutions
-            solutions_data.append({
-                "problem_title": problem_title,
-                "problem_url": problem_url,
-                "solutions": extracted_solutions
-            })
-
-        # ✅ Click "Next" to load more problems
+        # Go to the next page if available
         try:
             next_btn = browser.find_element(By.XPATH, "//button[contains(text(), 'Next')]")
             next_btn.click()
-            time.sleep(5)
+            time.sleep(3)
+            print(f"[*] Moved to page {page_index+2} of problems...")
         except NoSuchElementException:
-            print("[*] No more pages or 'Next' button not found.")
+            print("[*] No more 'Next' button found. Stopping problemset scrape.")
             break
 
-    return solutions_data
+    return all_solutions_data
 
 
-# 7) Scroll the page to load more solutions (if applicable)
-def scroll_page(browser):
-    """
-    Scrolls down the solutions page to load all solutions dynamically.
-    """
-    body = browser.find_element(By.TAG_NAME, "body")
-    
-    for _ in range(5):  # Scroll down 5 times
-        body.send_keys(Keys.PAGE_DOWN)
-        time.sleep(1)  # Give time for loading new elements
-
-    print("[*] Scrolled through the solutions page.")
-
-
-
-# 8) Main function to orchestrate the scraping
+########################################
+# 10) MAIN ENTRY POINT
+########################################
 def main():
-    data = []
+    """
+    Main function: logs in, scrapes solutions, prints or processes the final data.
+    """
     browser = init_browser()
+    solutions_data = []
+
     try:
+        # 1) Log in
         login_to_leetcode(browser)
-        # For demonstration, let's only scrape 1 page to avoid heavy load
-        data = scrape_problems(browser, num_pages=1)
+
+        # 2) Scrape solutions from the first page of "All Problems" only (num_pages=1).
+        #    Increase num_pages if you want to go deeper.
+        solutions_data = scrape_problems(browser, num_pages=1)
+
     except Exception as e:
-        print(f"An error occurred: {e}")
+        print(f"[!] A major error occurred: {e}")
+
     finally:
-        input("Press Enter to close browser...")
+        input("[!] Press Enter to close the browser...")
         browser.quit()
 
-    # Print or store the results
-    print("[*] Scraping done. Solutions data:")
-    for item in data:
-        print("========================================")
+    # Print a summary of the scraped data
+    print("\n\n[=== SCRAPING COMPLETE ===]")
+    for item in solutions_data:
+        print("=====================================================")
         print(f"Problem: {item['problem_title']}")
         print(f"Link: {item['problem_url']}")
-        print(f"Regex time complexity: {item['time_complexity_regex']}")
-        print(f"Regex space complexity: {item['space_complexity_regex']}")
-        print(f"Original snippet (truncated): {item['original_snippet'][:100]} ...")
-        print("Converted to C++ (truncated):")
-        print(item['converted_cxx_snippet'][:200], "...")
-        print("Complexities (raw ChatGPT response):")
-        print(item['complexities_chatgpt'])
-        print("========================================")
+        print(f"Number of solutions: {len(item['solutions'])}")
+        for sol in item["solutions"]:
+            print(f"  - C++ Solution #{sol['index']}:")
+            print(f"    Code (truncated): {sol['code'][:100]}...")
+            print(f"    ChatGPT Analysis: {sol['chatgpt_analysis'][:100]}...")
+        print("=====================================================")
+
 
 if __name__ == "__main__":
     main()
